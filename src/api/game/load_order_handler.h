@@ -37,7 +37,7 @@
 namespace loot {
 class LoadOrderHandler {
 public:
-  LoadOrderHandler();
+  explicit LoadOrderHandler();
   ~LoadOrderHandler();
 
   void Init(const GameType& game,
