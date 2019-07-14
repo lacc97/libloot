@@ -32,6 +32,7 @@
 #else
 #include <unicode/uchar.h>
 #include <unicode/unistr.h>
+using namespace icu;
 #endif
 
 using std::regex;
