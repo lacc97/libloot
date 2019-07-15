@@ -305,6 +305,11 @@ if(${BUILD_SHARED_LIBS})
 else()
     add_library(loot STATIC ${LIBLOOT_SRC} ${LIBLOOT_HEADERS})
 endif()
+set_target_properties(loot PROPERTIES
+    CXX_VISIBILITY_PRESET   hidden)
+target_compile_definitions(loot
+    PRIVATE
+        $<IF:$<BOOL:${BUILD_SHARED_LIBS}>,LOOT_EXPORT,LOOT_STATIC>)
 target_include_directories(loot
     PUBLIC
         $<INSTALL_INTERFACE:include>
@@ -333,11 +338,6 @@ endif()
 
 IF (CMAKE_SYSTEM_NAME MATCHES "Windows")
     set_target_properties (libloot_internals_tests PROPERTIES COMPILE_DEFINITIONS "${COMPILE_DEFINITIONS} LOOT_STATIC")
-    IF (BUILD_SHARED_LIBS)
-        set_target_properties (loot PROPERTIES COMPILE_DEFINITIONS "${COMPILE_DEFINITIONS} LOOT_EXPORT")
-    ELSE ()
-        set_target_properties (loot PROPERTIES COMPILE_DEFINITIONS "${COMPILE_DEFINITIONS} LOOT_STATIC")
-    ENDIF ()
 ENDIF ()
 
 

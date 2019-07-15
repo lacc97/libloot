@@ -38,7 +38,11 @@
 #define LOOT_API __declspec(dllimport)
 #endif
 #else
+#ifdef LOOT_EXPORT
+#define LOOT_API __attribute__ ((visibility ("default")))
+#else
 #define LOOT_API
+#endif
 #endif
 
 #endif
