@@ -1,18 +1,15 @@
-cmake_minimum_required (VERSION 2.8.12.1)
+cmake_minimum_required (VERSION 3.11)
 cmake_policy(SET CMP0015 NEW)
 project (libloot)
+
 include(ExternalProject)
 
-option(BUILD_SHARED_LIBS "Build a shared library" ON)
-option(MSVC_STATIC_RUNTIME "Build with static runtime libs (/MT)" OFF)
+option(BUILD_TESTS          "Build libloot and libloot_api tests"   OFF)
+option(BUILD_SHARED_LIBS    "Build a shared library"                ON)
+option(MSVC_STATIC_RUNTIME  "Build with static runtime libs (/MT)"  OFF)
 
-IF (${MSVC_STATIC_RUNTIME})
-    set (MSVC_SHARED_RUNTIME OFF)
-ELSE()
-    set (MSVC_SHARED_RUNTIME ON)
-ENDIF()
+set(MSVC_SHARED_RUNTIME $<NOT:$<BOOL:${MSVC_STATIC_RUNTIME}>>)
 
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -34,13 +31,15 @@ ENDIF ()
 message(STATUS "Git revision: ${GIT_COMMIT_STRING}")
 
 # Write to file.
-configure_file("${CMAKE_SOURCE_DIR}/src/api/loot_version.cpp.in" "${CMAKE_BINARY_DIR}/generated/loot_version.cpp" @ONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/api/loot_version.cpp.in" "${CMAKE_CURRENT_BINARY_DIR}/generated/loot_version.cpp" @ONLY)
 
 ##############################
 # External Projects
 ##############################
 
-set (Boost_USE_STATIC_LIBS ON)
+if(NOT DEFINED Boost_USE_STATIC_LIBS)
+    set (Boost_USE_STATIC_LIBS ON)
+endif()
 set (Boost_USE_MULTITHREADED ON)
 
 IF (MSVC)
@@ -49,8 +48,8 @@ ELSE()
     set (Boost_USE_STATIC_RUNTIME OFF)
 ENDIF()
 
-IF (NOT Boost_USE_STATIC_LIBS)
-    add_definitions(-DBOOST_LOG_DYN_LINK)
+IF (NOT ${Boost_USE_STATIC_LIBS})
+    set(BOOST_DL Boost::dynamic_linking)
 ENDIF ()
 
 IF (CMAKE_SYSTEM_NAME MATCHES "Windows")
@@ -64,126 +63,49 @@ ELSE ()
 ENDIF ()
 
 find_package(Boost REQUIRED COMPONENTS locale system)
+set(BOOST_LIBS ${BOOST_DL} Boost::locale Boost::system)
 
 if (NOT CMAKE_SYSTEM_NAME MATCHES "Windows")
     find_package(ICU REQUIRED COMPONENTS uc)
-    include_directories($ICU_INCLUDE_DIRS)
-    link_directories($ICU_LIBRARY_DIRS)
 endif()
 
-ExternalProject_Add(GTest
-                    PREFIX "external"
-                    URL "https://github.com/google/googletest/archive/release-1.8.1.tar.gz"
-                    CMAKE_ARGS -Dgtest_force_shared_crt=${MSVC_SHARED_RUNTIME} -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
-                    INSTALL_COMMAND "")
-ExternalProject_Get_Property(GTest SOURCE_DIR BINARY_DIR)
-set (GTEST_INCLUDE_DIRS "${SOURCE_DIR}/googletest/include")
-set (GTEST_LIBRARIES "${BINARY_DIR}/googlemock/gtest/${CMAKE_CFG_INTDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}")
+set(ESPLUGIN_VERSION 2.1.2)
+include(cmake/esplugin.cmake)
 
-ExternalProject_Add(esplugin
-                    PREFIX "external"
-                    URL "https://github.com/Ortham/esplugin/archive/2.1.2.tar.gz"
-                    CONFIGURE_COMMAND ""
-                    BUILD_IN_SOURCE 1
-                    BUILD_COMMAND cargo build --release --manifest-path ffi/Cargo.toml --target ${RUST_TARGET} &&
-                        cbindgen ffi/ -o ffi/include/esplugin.hpp
-                    INSTALL_COMMAND "")
-ExternalProject_Get_Property(esplugin SOURCE_DIR)
-set (ESPLUGIN_INCLUDE_DIRS "${SOURCE_DIR}/ffi/include")
-set (ESPLUGIN_LIBRARIES "${SOURCE_DIR}/target/${RUST_TARGET}/release/${CMAKE_STATIC_LIBRARY_PREFIX}esplugin_ffi${CMAKE_STATIC_LIBRARY_SUFFIX}")
-IF (CMAKE_SYSTEM_NAME MATCHES "Windows")
-    set (ESPLUGIN_LIBRARIES ${ESPLUGIN_LIBRARIES} Userenv)
-ELSE ()
-    set (ESPLUGIN_LIBRARIES ${ESPLUGIN_LIBRARIES} dl)
-ENDIF ()
+set(LIBGIT2_VERSION 0.28.2)
+include(cmake/libgit2.cmake)
 
-ExternalProject_Add(libgit2
-                    PREFIX "external"
-                    URL "https://github.com/libgit2/libgit2/archive/v0.28.2.tar.gz"
-                    CMAKE_ARGS -DBUILD_SHARED_LIBS=OFF -DBUILD_CLAR=OFF -DSTATIC_CRT=${MSVC_STATIC_RUNTIME} -DCMAKE_POSITION_INDEPENDENT_CODE=${CMAKE_POSITION_INDEPENDENT_CODE}
-                    BUILD_COMMAND ${CMAKE_COMMAND} --build . --target git2 --config $(CONFIGURATION)
-                    INSTALL_COMMAND "")
-ExternalProject_Get_Property(libgit2 SOURCE_DIR BINARY_DIR)
-set(LIBGIT2_INCLUDE_DIRS "${SOURCE_DIR}/include")
-set(LIBGIT2_LIBRARIES "${BINARY_DIR}/${CMAKE_CFG_INTDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}git2${CMAKE_STATIC_LIBRARY_SUFFIX}")
+set(LIBLOADORDER_VERSION 12.0.1)
+include(cmake/libloadorder.cmake)
 
-ExternalProject_Add(libloadorder
-                    PREFIX "external"
-                    URL "https://github.com/Ortham/libloadorder/archive/12.0.1.tar.gz"
-                    CONFIGURE_COMMAND ""
-                    BUILD_IN_SOURCE 1
-                    BUILD_COMMAND cargo build --release --manifest-path ffi/Cargo.toml --target ${RUST_TARGET} &&
-                        cbindgen ffi/ -l c++ -o ffi/include/libloadorder.hpp
-                    INSTALL_COMMAND "")
-ExternalProject_Get_Property(libloadorder SOURCE_DIR)
-set(LIBLOADORDER_INCLUDE_DIRS "${SOURCE_DIR}/ffi/include")
-set(LIBLOADORDER_LIBRARIES "${SOURCE_DIR}/target/${RUST_TARGET}/release/${CMAKE_STATIC_LIBRARY_PREFIX}loadorder_ffi${CMAKE_STATIC_LIBRARY_SUFFIX}")
-IF (CMAKE_SYSTEM_NAME MATCHES "Windows")
-    set (LIBLOADORDER_LIBRARIES ${LIBLOADORDER_LIBRARIES} Userenv)
-ELSE ()
-    set (LIBLOADORDER_LIBRARIES ${LIBLOADORDER_LIBRARIES} dl)
-ENDIF ()
+set(LCI_VERSION 2.0.0)
+include(cmake/loot-condition-interpreter.cmake)
 
-ExternalProject_Add(loot-condition-interpreter
-                    PREFIX "external"
-                    URL "https://github.com/loot/loot-condition-interpreter/archive/2.0.0.tar.gz"
-                    CONFIGURE_COMMAND ""
-                    BUILD_IN_SOURCE 1
-                    BUILD_COMMAND cargo build --release --manifest-path ffi/Cargo.toml --target ${RUST_TARGET} &&
-                        cbindgen ffi/ -o ffi/include/loot_condition_interpreter.h
-                    INSTALL_COMMAND "")
-ExternalProject_Get_Property(loot-condition-interpreter SOURCE_DIR)
-set (LCI_INCLUDE_DIRS "${SOURCE_DIR}/ffi/include")
-set (LCI_LIBRARIES "${SOURCE_DIR}/target/${RUST_TARGET}/release/${CMAKE_STATIC_LIBRARY_PREFIX}loot_condition_interpreter_ffi${CMAKE_STATIC_LIBRARY_SUFFIX}")
-IF (CMAKE_SYSTEM_NAME MATCHES "Windows")
-    set (LCI_LIBRARIES ${LCI_LIBRARIES} Userenv)
-ELSE ()
-    set (LCI_LIBRARIES ${LCI_LIBRARIES} dl)
-ENDIF ()
+set(SPDLOG_VERSION 1.3.1)
+include(cmake/spdlog.cmake)
 
-ExternalProject_Add(testing-metadata
-                    PREFIX "external"
-                    GIT_REPOSITORY "https://github.com/loot/testing-metadata"
-                    GIT_TAG "1.4.0"
-                    CONFIGURE_COMMAND ""
-                    BUILD_COMMAND ""
-                    INSTALL_COMMAND "")
+set(YAMLCPP_VERSION 0.6.2+merge-key-support.2)
+include(cmake/yaml-cpp.cmake)
 
-ExternalProject_Add(testing-plugins
-                    PREFIX "external"
-                    URL "https://github.com/Ortham/testing-plugins/archive/1.4.1.tar.gz"
-                    CONFIGURE_COMMAND ""
-                    BUILD_COMMAND ""
-                    INSTALL_COMMAND "")
+if(${BUILD_TESTS})
+    set(GTEST_VERSION 1.8.1)
+    include(cmake/gtest.cmake)
 
-ExternalProject_Add(spdlog
-                    PREFIX "external"
-                    URL "https://github.com/gabime/spdlog/archive/v1.3.1.tar.gz"
-                    CONFIGURE_COMMAND ""
-                    BUILD_COMMAND ""
-                    INSTALL_COMMAND "")
-ExternalProject_Get_Property(spdlog SOURCE_DIR)
-set(SPDLOG_INCLUDE_DIRS "${SOURCE_DIR}/include")
+    ExternalProject_Add(testing-metadata
+                        PREFIX "external"
+                        GIT_REPOSITORY "https://github.com/loot/testing-metadata"
+                        GIT_TAG "1.4.0"
+                        CONFIGURE_COMMAND ""
+                        BUILD_COMMAND ""
+                        INSTALL_COMMAND "")
 
-ExternalProject_Add(yaml-cpp
-                    PREFIX "external"
-                    URL "https://github.com/loot/yaml-cpp/archive/yaml-cpp-0.6.2+merge-key-support.2.tar.gz"
-                    CMAKE_ARGS -DMSVC_SHARED_RT=${MSVC_SHARED_RUNTIME} -DCMAKE_POSITION_INDEPENDENT_CODE=${CMAKE_POSITION_INDEPENDENT_CODE} -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
-                    BUILD_COMMAND ${CMAKE_COMMAND} --build . --target yaml-cpp --config $(CONFIGURATION)
-                    INSTALL_COMMAND "")
-ExternalProject_Get_Property(yaml-cpp SOURCE_DIR BINARY_DIR)
-
-if (MSVC)
-    if (MSVC_STATIC_RUNTIME)
-      set(YAML_CPP_LIBRARY_SUFFIX "${YAML_CPP_LIBRARY_SUFFIX}mt")
-    else()
-      set(YAML_CPP_LIBRARY_SUFFIX "${YAML_CPP_LIBRARY_SUFFIX}md")
-    endif()
+    ExternalProject_Add(testing-plugins
+                        PREFIX "external"
+                        URL "https://github.com/Ortham/testing-plugins/archive/1.4.1.tar.gz"
+                        CONFIGURE_COMMAND ""
+                        BUILD_COMMAND ""
+                        INSTALL_COMMAND "")
 endif()
-
-set(YAML_CPP_LIBRARY_SUFFIX "${LIB_SUFFIX}${YAML_CPP_LIBRARY_SUFFIX}$<$<CONFIG:Debug>:d>${CMAKE_STATIC_LIBRARY_SUFFIX}")
-set(YAML_CPP_INCLUDE_DIRS "${SOURCE_DIR}/include")
-set(YAML_CPP_LIBRARIES "${BINARY_DIR}/${CMAKE_CFG_INTDIR}/libyaml-cpp${YAML_CPP_LIBRARY_SUFFIX}")
 
 
 ##############################
@@ -191,124 +113,124 @@ set(YAML_CPP_LIBRARIES "${BINARY_DIR}/${CMAKE_CFG_INTDIR}/libyaml-cpp${YAML_CPP_
 ##############################
 
 
-set (LIBLOOT_SRC "${CMAKE_BINARY_DIR}/generated/loot_version.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/api.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/api_database.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/error_categories.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata/condition_evaluator.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata/conditional_metadata.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata/file.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata/group.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata/location.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata/message.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata/message_content.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata/plugin_cleaning_data.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata/plugin_metadata.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata/tag.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/game/game.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/game/game_cache.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/game/load_order_handler.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/metadata_list.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/masterlist.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/plugin.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/sorting/cyclic_interaction_error.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/sorting/group_sort.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/sorting/plugin_sorter.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/sorting/plugin_sorting_data.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/helpers/crc.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/helpers/git_helper.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/helpers/text.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/vertex.cpp"
-                  "${CMAKE_SOURCE_DIR}/src/api/resource.rc")
+set (LIBLOOT_SRC "${CMAKE_CURRENT_BINARY_DIR}/generated/loot_version.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/api.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/api_database.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/error_categories.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/condition_evaluator.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/conditional_metadata.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/file.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/group.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/location.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/message.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/message_content.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/plugin_cleaning_data.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/plugin_metadata.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/tag.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/game/game.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/game/game_cache.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/game/load_order_handler.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata_list.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/masterlist.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/plugin.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/sorting/cyclic_interaction_error.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/sorting/group_sort.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/sorting/plugin_sorter.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/sorting/plugin_sorting_data.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/helpers/crc.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/helpers/git_helper.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/helpers/text.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/vertex.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/src/api/resource.rc")
 
-set (LIBLOOT_HEADERS "${CMAKE_SOURCE_DIR}/include/loot/api.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/api_decorator.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/database_interface.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/exception/error_categories.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/exception/condition_syntax_error.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/exception/cyclic_interaction_error.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/exception/file_access_error.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/exception/git_state_error.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/exception/undefined_group_error.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/enum/edge_type.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/enum/game_type.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/enum/log_level.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/enum/message_type.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/game_interface.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/loot_version.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/metadata/conditional_metadata.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/metadata/file.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/metadata/group.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/metadata/location.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/metadata/message.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/metadata/message_content.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/metadata/plugin_cleaning_data.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/metadata/plugin_metadata.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/metadata/tag.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/plugin_interface.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/struct/masterlist_info.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/struct/simple_message.h"
-                      "${CMAKE_SOURCE_DIR}/include/loot/vertex.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/api_database.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata/condition_evaluator.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata/yaml/file.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata/yaml/group.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata/yaml/location.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata/yaml/message.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata/yaml/message_content.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata/yaml/plugin_cleaning_data.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata/yaml/plugin_metadata.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata/yaml/set.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata/yaml/tag.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/game/game.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/game/game_cache.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/game/load_order_handler.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/metadata_list.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/masterlist.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/plugin.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/sorting/group_sort.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/sorting/plugin_sorter.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/sorting/plugin_sorting_data.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/helpers/git_helper.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/helpers/crc.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/helpers/logging.h"
-                      "${CMAKE_SOURCE_DIR}/src/api/helpers/text.h")
+set (LIBLOOT_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/api.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/api_decorator.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/database_interface.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/exception/error_categories.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/exception/condition_syntax_error.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/exception/cyclic_interaction_error.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/exception/file_access_error.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/exception/git_state_error.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/exception/undefined_group_error.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/enum/edge_type.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/enum/game_type.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/enum/log_level.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/enum/message_type.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/game_interface.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/loot_version.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/metadata/conditional_metadata.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/metadata/file.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/metadata/group.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/metadata/location.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/metadata/message.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/metadata/message_content.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/metadata/plugin_cleaning_data.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/metadata/plugin_metadata.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/metadata/tag.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/plugin_interface.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/struct/masterlist_info.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/struct/simple_message.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/include/loot/vertex.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/api_database.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/condition_evaluator.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/yaml/file.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/yaml/group.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/yaml/location.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/yaml/message.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/yaml/message_content.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/yaml/plugin_cleaning_data.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/yaml/plugin_metadata.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/yaml/set.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata/yaml/tag.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/game/game.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/game/game_cache.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/game/load_order_handler.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/metadata_list.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/masterlist.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/plugin.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/sorting/group_sort.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/sorting/plugin_sorter.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/sorting/plugin_sorting_data.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/helpers/git_helper.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/helpers/crc.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/helpers/logging.h"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/api/helpers/text.h")
 
-set (LOOT_TESTS_SRC "${CMAKE_SOURCE_DIR}/src/tests/api/internals/main.cpp")
+set (LOOT_TESTS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/main.cpp")
 
-set (LOOT_TESTS_HEADERS "${CMAKE_SOURCE_DIR}/src/tests/api/internals/game/game_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/game/game_cache_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/game/load_order_handler_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/helpers/git_helper_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/helpers/crc_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/helpers/text_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/helpers/yaml_set_helpers_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata/condition_evaluator_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata/conditional_metadata_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata/file_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata/group_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata/location_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata/message_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata/message_content_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata/plugin_cleaning_data_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata/plugin_metadata_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata/tag_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/plugin_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/sorting/group_sort_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/sorting/plugin_sorter_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/masterlist_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/api/internals/metadata_list_test.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/common_game_test_fixture.h"
-                        "${CMAKE_SOURCE_DIR}/src/tests/printers.h")
+set (LOOT_TESTS_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/game/game_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/game/game_cache_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/game/load_order_handler_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/helpers/git_helper_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/helpers/crc_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/helpers/text_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/helpers/yaml_set_helpers_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata/condition_evaluator_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata/conditional_metadata_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata/file_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata/group_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata/location_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata/message_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata/message_content_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata/plugin_cleaning_data_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata/plugin_metadata_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata/tag_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/plugin_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/sorting/group_sort_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/sorting/plugin_sorter_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/masterlist_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/internals/metadata_list_test.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/common_game_test_fixture.h"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/printers.h")
 
-set(LIBLOOT_TESTS_SRC "${CMAKE_SOURCE_DIR}/src/tests/api/interface/main.cpp")
+set(LIBLOOT_TESTS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/interface/main.cpp")
 
-set(LIBLOOT_TESTS_HEADERS  "${CMAKE_SOURCE_DIR}/src/tests/api/interface/api_game_operations_test.h"
-                            "${CMAKE_SOURCE_DIR}/src/tests/api/interface/create_game_handle_test.h"
-                            "${CMAKE_SOURCE_DIR}/src/tests/api/interface/database_interface_test.h"
-                            "${CMAKE_SOURCE_DIR}/src/tests/api/interface/game_interface_test.h"
-                            "${CMAKE_SOURCE_DIR}/src/tests/api/interface/is_compatible_test.h"
-                            "${CMAKE_SOURCE_DIR}/src/tests/common_game_test_fixture.h")
+set(LIBLOOT_TESTS_HEADERS  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/interface/api_game_operations_test.h"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/interface/create_game_handle_test.h"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/interface/database_interface_test.h"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/interface/game_interface_test.h"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/api/interface/is_compatible_test.h"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/common_game_test_fixture.h")
 
 source_group("Header Files\\api" FILES ${LIBLOOT_HEADERS})
 source_group("Header Files\\tests" FILES ${LOOT_TESTS_HEADERS})
@@ -317,18 +239,6 @@ source_group("Header Files\\tests" FILES ${LIBLOOT_TESTS_HEADERS})
 source_group("Source Files\\api" FILES ${LIBLOOT_SRC})
 source_group("Source Files\\tests" FILES ${LOOT_TESTS_SRC})
 source_group("Source Files\\tests" FILES ${LIBLOOT_TESTS_SRC})
-
-# Include source and library directories.
-include_directories ("${CMAKE_SOURCE_DIR}/src"
-                     "${CMAKE_SOURCE_DIR}/include"
-                     ${LIBLOADORDER_INCLUDE_DIRS}
-                     ${LIBGIT2_INCLUDE_DIRS}
-                     ${ESPLUGIN_INCLUDE_DIRS}
-                     ${LCI_INCLUDE_DIRS}
-                     ${Boost_INCLUDE_DIRS}
-                     ${SPDLOG_INCLUDE_DIRS}
-                     ${YAML_CPP_INCLUDE_DIRS}
-                     ${GTEST_INCLUDE_DIRS})
 
 ##############################
 # System-Specific Settings
@@ -340,9 +250,6 @@ IF (CMAKE_SYSTEM_NAME MATCHES "Windows")
 ENDIF ()
 
 IF (CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set (CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH};.")
-    set (CMAKE_BUILD_WITH_INSTALL_RPATH ON)
-
     set (LOOT_LIBS ssl
                    curl
                    z
@@ -392,20 +299,33 @@ ENDIF ()
 # Define Targets
 ##############################
 
-# Build tests.
-add_executable       (libloot_internals_tests ${LIBLOOT_SRC} ${LIBLOOT_HEADERS} ${LOOT_TESTS_SRC} ${LOOT_TESTS_HEADERS})
-add_dependencies     (libloot_internals_tests esplugin libgit2 libloadorder loot-condition-interpreter spdlog yaml-cpp GTest testing-metadata testing-plugins)
-target_link_libraries(libloot_internals_tests ${Boost_LIBRARIES} ${LIBGIT2_LIBRARIES} ${ESPLUGIN_LIBRARIES} ${LIBLOADORDER_LIBRARIES} ${LOOT_LIBS} ${LCI_LIBRARIES} ${YAML_CPP_LIBRARIES} ${GTEST_LIBRARIES} ${ICU_LIBRARIES})
-
 # Build API.
-add_library          (loot ${LIBLOOT_SRC} ${LIBLOOT_HEADERS})
-add_dependencies     (loot esplugin libgit2 libloadorder loot-condition-interpreter spdlog yaml-cpp)
-target_link_libraries(loot ${Boost_LIBRARIES} ${LIBGIT2_LIBRARIES} ${ESPLUGIN_LIBRARIES} ${LIBLOADORDER_LIBRARIES} ${LOOT_LIBS} ${LCI_LIBRARIES} ${YAML_CPP_LIBRARIES} ${ICU_LIBRARIES})
+if(${BUILD_SHARED_LIBS})
+    add_library(loot SHARED ${LIBLOOT_SRC} ${LIBLOOT_HEADERS})
+else()
+    add_library(loot STATIC ${LIBLOOT_SRC} ${LIBLOOT_HEADERS})
+endif()
+target_include_directories(loot
+    PUBLIC
+        $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(loot
+    PRIVATE
+        Boost::boost ${BOOST_LIBS} ICU::uc libgit2::libgit2 esplugin::esplugin libloadorder::libloadorder loot_condition_interpreter::lci yaml-cpp::yaml-cpp ${LOOT_LIBS})
 
+if(${BUILD_TESTS})
 # Build API tests.
 add_executable       (libloot_tests ${LIBLOOT_TESTS_SRC} ${LIBLOOT_TESTS_HEADERS})
 add_dependencies     (libloot_tests loot GTest testing-metadata testing-plugins)
 target_link_libraries(libloot_tests loot ${GTEST_LIBRARIES})
+
+# Build tests.
+add_executable       (libloot_internals_tests ${LIBLOOT_SRC} ${LIBLOOT_HEADERS} ${LOOT_TESTS_SRC} ${LOOT_TESTS_HEADERS})
+add_dependencies     (libloot_internals_tests esplugin libgit2 libloadorder loot-condition-interpreter spdlog yaml-cpp GTest testing-metadata testing-plugins)
+target_link_libraries(libloot_internals_tests ${Boost_LIBRARIES} ${LIBGIT2_LIBRARIES} ${ESPLUGIN_LIBRARIES} ${LIBLOADORDER_LIBRARIES} ${LOOT_LIBS} ${LCI_LIBRARIES} ${YAML_CPP_LIBRARIES} ${GTEST_LIBRARIES} ${ICU_LIBRARIES})
+endif()
 
 ##############################
 # Set Target-Specific Flags
@@ -425,6 +345,7 @@ ENDIF ()
 # Post-Build Steps
 ##############################
 
+if(${BUILD_TESTS})
 # Copy testing metadata
 ExternalProject_Get_Property(testing-metadata SOURCE_DIR)
 add_custom_command(TARGET libloot_internals_tests POST_BUILD
@@ -446,26 +367,30 @@ add_custom_command(TARGET libloot_tests POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${SOURCE_DIR}
       $<TARGET_FILE_DIR:libloot_tests>)
+endif()
 
 ########################################
 # Install
 ########################################
 
-install(TARGETS loot
-        DESTINATION ".")
+install(TARGETS loot EXPORT libloot
+        DESTINATION lib)
 
 IF (MSVC)
     install(FILES $<TARGET_PDB_FILE:loot>
-    DESTINATION .
+    DESTINATION lib/pdb
     OPTIONAL
     CONFIGURATIONS RelWithDebInfo)
 ENDIF ()
 
-install(DIRECTORY "${CMAKE_SOURCE_DIR}/include"
-        DESTINATION ".")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
+        DESTINATION include)
 
-install(DIRECTORY "${CMAKE_BINARY_DIR}/docs/html/"
-        DESTINATION "docs")
+#install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs/html/"
+#        DESTINATION docs)
+
+install(EXPORT libloot NAMESPACE libloot::
+        DESTINATION cmake)
 
 ########################################
 # CPack
@@ -493,6 +418,6 @@ else()
 endif()
 
 set(CPACK_PACKAGE_VERSION ${GIT_DESCRIBE_STRING})
-set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/package")
+set(CPACK_PACKAGE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/package")
 
 include(CPack)
